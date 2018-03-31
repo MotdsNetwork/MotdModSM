@@ -1,0 +1,2 @@
+# MotdModSM
+MotdMod SourceMod Plugin

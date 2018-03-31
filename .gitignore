@@ -1,0 +1,6 @@
+.DS_Store
+compile.dat
+compile.sh
+spcomp
+
+compiled/
