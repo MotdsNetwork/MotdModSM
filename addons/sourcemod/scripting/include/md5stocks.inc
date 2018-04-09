@@ -25,7 +25,7 @@ stock bool MD5_File(const char[] path, char[] md5final, int maxsize)
     if(!FileExists(path))
         return false;
     
-    File f = OpenFile(path, "r");
+    File f = OpenFile(path, "rb");
     Handle md5 = MD5Init();
 
     int len;
