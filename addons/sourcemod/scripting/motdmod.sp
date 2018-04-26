@@ -32,7 +32,7 @@
 #pragma newdecls required
 #pragma semicolon 1
 
-#define PLUGIN_VERSION "1.2.0"
+#define PLUGIN_VERSION "1.2.2"
 
 // Messages
 #define MSG_TAG "[MotdMod SM]"
@@ -49,6 +49,7 @@
 
 // info stringtable key
 #define INFO_PANEL_STRING "__motdmod_loading"
+#define INFO_PANEL_TEXT_STRING "__motdmod_text"
 
 /*
 +==================================================================================+
@@ -845,8 +846,8 @@ public void MotdMod_QueryCookie(QueryCookie cookie, int client, ConVarQueryResul
     if (bDisabled)
     {
         // text only
-        info.SetNum("type", MOTDPANEL_TYPE_TEXT);
-        info.SetString("msg", g_sNoHTML);
+        info.SetNum("type", MOTDPANEL_TYPE_INDEX);
+        info.SetString("msg", INFO_PANEL_TEXT_STRING);
     }
     else
     {
@@ -1095,6 +1096,8 @@ public int WebCallback_LoadMotdUrl(any discarded, const char[] buffer, bool succ
             g_bPluginInitInProcess = false;
             LogError("Failed to get MOTD URL from motdmod api! (can't find URL)");
         }
+        
+        SetInfoPanelData(INFO_PANEL_TEXT_STRING, g_sNoHTML);
         
         DebugMessage(g_sMotdUrl);
         DebugMessage(g_sNoHTML);
