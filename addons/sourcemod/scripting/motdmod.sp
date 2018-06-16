@@ -27,12 +27,11 @@
 #include <md5stocks>
 
 #include <stocksoup/datapack>
-#include "vgui_cache_buster/usermessage.sp"
 
 #pragma newdecls required
 #pragma semicolon 1
 
-#define PLUGIN_VERSION "1.2.2"
+#define PLUGIN_VERSION "1.3.0"
 
 // Messages
 #define MSG_TAG "[MotdMod SM]"
@@ -50,6 +49,9 @@
 // info stringtable key
 #define INFO_PANEL_STRING "__motdmod_loading"
 #define INFO_PANEL_TEXT_STRING "__motdmod_text"
+
+#define MOTDMOD_CACHE_DIR "data/motdmod"
+#define MOTDMOD_CACHE_FILE MOTDMOD_CACHE_DIR ... "/url_cache"
 
 /*
 +==================================================================================+
@@ -102,8 +104,6 @@ char g_sNoHTML[2048];
 char g_sPluginMD5[256];
 char g_sServerName[256];
 char g_sServerOS[10];
-
-float g_flNextAllowInfoPanelTime[MAXPLAYERS + 1];
 
 bool g_bIsViewingMOTD[MAXPLAYERS + 1];
 
@@ -227,7 +227,6 @@ public void OnMapStart()
 
 public void OnClientConnected(int client)
 {
-    g_flNextAllowInfoPanelTime[client] = GetGameTime() - (0.5 * 2);
     g_bIsViewingMOTD[client] = false;
 }
 
@@ -356,6 +355,13 @@ void ValidateSupportedEngine()
     for(int i = 0; i < sizeof(g_SupportedGames); i++)
         if (g_GameEngine == g_SupportedGames[i])
             found = true;
+
+    char sGameType[16];
+    GetGameFolderName(sGameType, sizeof(sGameType));
+
+    if(StrEqual(sGameType, "nmrih", true))
+        found = true;
+
     if(!found)
         SetFailState(MSG_ERROR_NOT_COMPATIBLE);
 }
@@ -736,9 +742,6 @@ public Action OnVGUIMenu(UserMsg msg_id, Handle msg, const int[] players, int pl
     if (kv.GetNum("type") == MOTDPANEL_TYPE_INDEX && StrEqual(panelMsg, "motd"))
     {
         int client = players[0];
-
-        if (g_flNextAllowInfoPanelTime[client] > GetGameTime())
-            return Plugin_Handled;
         
         DebugMessage("OnVGUIMenu() :: Overwriting MOTD");
         
@@ -751,39 +754,6 @@ public Action OnVGUIMenu(UserMsg msg_id, Handle msg, const int[] players, int pl
     delete kv;
     DebugMessage("OnVGUIMenu() :: COMPLETE");
     return Plugin_Continue;
-}
-
-public void OnDisplayHiddenInvalidMOTD(DataPack data)
-{
-    int clients[MAXPLAYERS];
-    
-    data.Reset();
-    int nClients = ReadPackClientList(data, clients, sizeof(clients));
-    
-    delete data;
-    
-    if (nClients)
-        DisplayHiddenInvalidMOTD(clients, nClients);
-}
-
-/**
- * Displays a hidden MOTD that busts the cache with a temporary HTML page.
- * 
- * @noreturn
- */
-void DisplayHiddenInvalidMOTD(const int[] players, int nPlayers)
-{
-    static KeyValues invalidPageInfo;
-    
-    if (!invalidPageInfo)
-    {
-        invalidPageInfo = new KeyValues("data");
-        invalidPageInfo.SetString("title", "");
-        invalidPageInfo.SetNum("type", MOTDPANEL_TYPE_INDEX);
-        invalidPageInfo.SetString("msg", INFO_PANEL_STRING);
-    }
-    
-    ShowInfoPanelBlockHooks(players, nPlayers, invalidPageInfo, false);
 }
 
 /**
@@ -801,9 +771,6 @@ public void MotdMod_QueryCookie(QueryCookie cookie, int client, ConVarQueryResul
     DebugMessage("MotdMod_QueryCookie() :: init");
     
     if (result != ConVarQuery_Okay)
-        return;
-    
-    if (g_flNextAllowInfoPanelTime[client] > GetGameTime())
         return;
     
     int bDisabled = StringToFloat(cvarValue) != 0.0;
@@ -862,54 +829,25 @@ public void MotdMod_QueryCookie(QueryCookie cookie, int client, ConVarQueryResul
     if (g_GameEngine == Engine_CSGO)
     {
         DebugMessage("MotdMod_QueryCookie() :: displaying MOTD");
-        ShowInfoPanelBlockHooks(clients, 1, info, true);
         
-        g_bIsViewingMOTD[client] = true;
+        if (GetClientTeam(client) == 0 /* CS_TEAM_NONE */) {
+            /**
+             * override cache buster's default value of forcing CS:GO popups since we're using
+             * the real MOTD panel when not assigned to a team yet
+             * 
+             * does nothing if VCB isn't present (which is fine, since it affects the real MOTD
+             * panel without it)
+             */
+            info.SetNum("x-vgui-popup", false);
+        }
     }
-    else
-    {
-        // cache busting logic
-        DataPack data = new DataPack();
-        WritePackClientList(data, clients, 1);
 
-        // TODO check if we can remove this RequestFrame call and use the function directly
-        RequestFrame(OnDisplayHiddenInvalidMOTD, data);
+    ShowVGUIPanel(client, "info", info, true);
 
-        DataPack kvData = new DataPack();
-        kvData.WriteCell(GetClientUserId(client));
-        kvData.WriteCell(CloneHandle(info));
-    
-        DebugMessage("MotdMod_QueryCookie() :: invoking cache busting (url %s)", url);
-        CreateTimer(0.75, MotdMod_BustCache, kvData);
-        g_flNextAllowInfoPanelTime[client] = GetGameTime() + 0.75;
-    }
+    g_bIsViewingMOTD[client] = true;
     
     delete info;
     DebugMessage("MotdMod_QueryCookie() :: complete");
-}
-
-public Action MotdMod_BustCache(Handle timer, DataPack data)
-{
-    DebugMessage("MotdMod_BustCache() :: init");
-    data.Reset();
-    
-    int client = GetClientOfUserId(data.ReadCell());
-    KeyValues info = data.ReadCell();
-    
-    if (client)
-    {
-        int clients[1];
-        clients[0] = client;
-        
-        DebugMessage("MotdMod_BustCache() :: displaying MOTD");
-        ShowInfoPanelBlockHooks(clients, 1, info, true);
-        
-        g_bIsViewingMOTD[client] = true;
-    }
-    
-    delete info;
-    delete data;
-    DebugMessage("MotdMod_BustCache() :: complete");
 }
 
 /**
@@ -1075,33 +1013,51 @@ public int WebCallback_LoadMotdUrl(any discarded, const char[] buffer, bool succ
     DebugMessage("WebCallback_LoadMotdUrl() :: init");
     DebugMessage(buffer);
     
-    if (!success)
+    char cacheDir[PLATFORM_MAX_PATH];
+    BuildPath(Path_SM, cacheDir, sizeof(cacheDir), "%s", MOTDMOD_CACHE_DIR);
+    
+    if (!DirExists(cacheDir))
     {
-        g_bPluginInitInProcess = false;
-        SetFailState("Failed to get MOTD URL from motdmod api!");
+        CreateDirectory(cacheDir, 0b111000000);
+    }
+    
+    char cachePath[PLATFORM_MAX_PATH];
+    BuildPath(Path_SM, cachePath, sizeof(cachePath), "%s", MOTDMOD_CACHE_FILE);
+    
+    KeyValues kv = CreateKeyValues("Motdmod");
+    
+    if(success && kv.ImportFromString(buffer))
+    {
+        kv.ExportToFile(cachePath);
+        DebugMessage("Wrote MOTD URL response to cache.");
+    }
+    else if (FileExists(cachePath) && kv.ImportFromFile(cachePath))
+    {
+        LogError("%s", "API response unsuccessful: loading last successful response from cache.");
     }
     else
     {
-        KeyValues kv = CreateKeyValues("Motdmod");
-        if(!kv.ImportFromString(buffer))
-            SetFailState("Failed to get MOTD URL from motdmod api! (Response is not KV)");
-        kv.JumpToKey("results");
-        kv.GetString("motdUrl", g_sMotdUrl, sizeof(g_sMotdUrl));
-        kv.GetString("noHtmlText", g_sNoHTML, sizeof(g_sNoHTML));
-        
+        g_bPluginInitInProcess = false;
         delete kv;
-        
-        if(!strlen(g_sMotdUrl))
-        {
-            g_bPluginInitInProcess = false;
-            LogError("Failed to get MOTD URL from motdmod api! (can't find URL)");
-        }
-        
-        SetInfoPanelData(INFO_PANEL_TEXT_STRING, g_sNoHTML);
-        
-        DebugMessage(g_sMotdUrl);
-        DebugMessage(g_sNoHTML);
+        SetFailState("Failed to get MOTD URL from motdmod api!");
     }
+    
+    kv.JumpToKey("results");
+    kv.GetString("motdUrl", g_sMotdUrl, sizeof(g_sMotdUrl));
+    kv.GetString("noHtmlText", g_sNoHTML, sizeof(g_sNoHTML));
+    
+    delete kv;
+    
+    if(!strlen(g_sMotdUrl))
+    {
+        g_bPluginInitInProcess = false;
+        LogError("Failed to get MOTD URL from motdmod api! (can't find URL)");
+    }
+    
+    SetInfoPanelData(INFO_PANEL_TEXT_STRING, g_sNoHTML);
+    
+    DebugMessage(g_sMotdUrl);
+    DebugMessage(g_sNoHTML);
     
     g_bPluginInitInProcess = false;
     DebugMessage("WebCallback_LoadMotdUrl() :: complete");
